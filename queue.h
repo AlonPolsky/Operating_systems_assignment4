@@ -30,9 +30,9 @@ size_t visited(void);
 // In that case it'll be a node in the list referenced by head and tail in q, otherwise it'll be implemented it'll be a node in the list
 // referenced by cond_head and cond_tail.
 typedef struct Node{
-    void* content;
     cnd_t cond;
     struct Node* next;
+    void* content;
 }Node;
 
 // Q represents the que. Head and tail attributes are for a list for item nodes, reserved for items waiting for a thread to take them.

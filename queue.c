@@ -71,9 +71,9 @@ size_t visited(void)
 
 void test(char* s ,int* a)
 {
+    fprintf(stderr, "===============\n");
     fprintf(stderr ,"tid: %lu \n", thrd_current());
-    if(a != NULL)
-        printf("%s: %d \n", s, *a);
+    fprintf(stderr, "%s: %d \n", s, *a);
     fprintf(stderr ,"size: %lu \n", size());
     fprintf(stderr, "waiting: %lu \n", waiting());
     fprintf(stderr, "visited: %lu \n", visited());
@@ -98,7 +98,7 @@ void enqueue(void* enqued){
             q->cond_tail = NULL;
     }
     q->s++;
-    //test("enque", enqued);
+    test("enqueue", enqued);
     mtx_unlock(&(q->q_lock));
 }
 
@@ -129,12 +129,11 @@ void* dequeue(void){
             q->tail = NULL;
         }
         returned = node->content;
-        // printf("freeing: %p\n", &(*node));
         free(node);
     }
     q->s--;
     q->visited++;
-    // test("dequeue", returned);
+    test("dequeue", returned);
     mtx_unlock(&(q->q_lock));
     return returned;
 }
@@ -154,7 +153,6 @@ bool tryDequeue(void** return_pointer){
 
 int func(void* a)
 {
-    void* p;
     enqueue(a);
     dequeue();
     // else
@@ -165,16 +163,16 @@ int func(void* a)
 int main(){
     for(int j = 0; j < 2; j++)
     {
-        int a[20];
-        thrd_t thrds[20];
+        int a[2];
+        thrd_t thrds[2];
         initQueue();
-        for(int i = 0; i < 20; i++)
+        for(int i = 0; i < 2; i++)
             a[i] = i;
-        for(int i = 0; i < 20; i++)
+        for(int i = 0; i < 2; i++)
         {
             thrd_create(&thrds[i], func, &a[i]);
         }
-        for(int i = 0; i < 20; i++)
+        for(int i = 0; i < 2; i++)
         {
             thrd_join(thrds[i], NULL);
         }
