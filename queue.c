@@ -12,10 +12,12 @@ void enqueue_node(Node** head, Node** tail, Node* inserted)
     {
         *head = inserted;
         *tail = inserted;
+        inserted->prev = NULL;
     }
     else
     {
         (*tail)->next = inserted;
+        inserted->prev = *tail;
         *tail = inserted;
     }
 }
@@ -33,15 +35,27 @@ void list_destroy(Node* head, bool cond)
     }
 }
 
-
+Node* pass_through_head(long ticket){
+    Node* node  = q->head;
+    while (node != NULL)
+    {
+        if (node->ticket == ticket)
+        {
+            break;
+        }
+        node = node->next;
+    }
+    return node;
+}
 /*================================================================*/
 
 void initQueue(void){
     q = (Q*) malloc(sizeof(Q));
-    mtx_init(&(q->q_lock), mtx_recursive);
+    mtx_init(&(q->q_lock), mtx_plain | mtx_recursive);
     q->s = 0;
     q->cond_s = 0;
     q->visited = 0;
+    q->ticket_generator = 1;
     q->head = NULL;
     q->tail = NULL;
     q->cond_head = NULL;
@@ -71,34 +85,32 @@ size_t visited(void)
 
 void test(char* s ,int* a)
 {
-    fprintf(stderr, "===============\n");
     fprintf(stderr ,"tid: %lu \n", thrd_current());
-    fprintf(stderr, "%s: %d \n", s, *a);
+    if(a != NULL)
+        fprintf(stderr, "%s: %d \n", s, *a);
     fprintf(stderr ,"size: %lu \n", size());
     fprintf(stderr, "waiting: %lu \n", waiting());
     fprintf(stderr, "visited: %lu \n", visited());
+    fprintf(stderr, "===============\n");
 }
 
 
-void enqueue(void* enqued){
+void enqueue(void* enqueued){
     mtx_lock(&(q->q_lock));
-    if(q->cond_head == NULL)
+    Node* new_tail = (Node*) malloc(sizeof(Node));
+    INIT_NODE(new_tail, enqueued)
+    if(q->cond_head != NULL)
     {
-        Node* new_tail = (Node*) malloc(sizeof(Node));
-        //printf("allocing: %p\n", &(*new_tail));
-        new_tail->content = enqued;
-        enqueue_node(&(q->head), &(q->tail), new_tail);
-    }
-    else
-    {
-        q->cond_head->content = enqued;
+        new_tail->ticket = ++(q->ticket_generator);
+        q->cond_head->ticket = q->ticket_generator;
         cnd_signal(&(q->cond_head->cond));
         q->cond_head = q->cond_head->next;
         if(q->cond_head == NULL)
             q->cond_tail = NULL;
     }
+    enqueue_node(&(q->head), &(q->tail), new_tail);
     q->s++;
-    test("enqueue", enqued);
+    test("enqueued", (int*) enqueued);
     mtx_unlock(&(q->q_lock));
 }
 
@@ -106,73 +118,82 @@ void enqueue(void* enqued){
 void* dequeue(void){
     mtx_lock(&(q->q_lock));
     void* returned;
-    Node* node;
-    if (q->head == NULL)
+    Node* node = pass_through_head(UNRESERVED);
+    if (node == NULL)
     {
+        fprintf(stderr, "going to sleep\n");
+        test(NULL, NULL);
+        Node* cond_node = (Node*) malloc(sizeof(Node));
+        INIT_NODE(cond_node, NULL)
+        cnd_init(&(cond_node->cond));
         q->cond_s++;
-        node = (Node*) malloc(sizeof(Node));
-        node->next = NULL;
-        cnd_init(&(node->cond));
-        enqueue_node(&(q->cond_head), &(q->cond_tail), node);
-        cnd_wait(&(node->cond), &(q->q_lock));
+        enqueue_node(&(q->cond_head), &(q->cond_tail), cond_node);
+        cnd_wait(&(cond_node->cond), &(q->q_lock));
         q->cond_s--;
-        cnd_destroy(&(node->cond));
-        returned = node->content;
-        free(node);
+        node = pass_through_head(cond_node->ticket);
+        cnd_destroy(&(cond_node->cond));
+        free(cond_node);
     }
-    else
-    {
-        node = q->head;
-        q->head = q->head->next;
-        if (q->head == NULL)
-        {
-            q->tail = NULL;
-        }
-        returned = node->content;
-        free(node);
-    }
+    returned = node->content;
+    if(node->next != NULL)
+        node->next->prev = node->prev;
+    if(node->prev != NULL)
+        node->prev->next = node->next;
+    if(node == q->head)
+        q->head = node->next;
+    if(node == q->tail)
+        q->tail = node->prev;
     q->s--;
     q->visited++;
-    test("dequeue", returned);
+    free(node);
+    test("dequeued", (int*) returned);
     mtx_unlock(&(q->q_lock));
     return returned;
 }
 
 bool tryDequeue(void** return_pointer){
     mtx_lock(&(q->q_lock));
-    if(q->head == NULL)
+    if(pass_through_head(UNRESERVED) == NULL)
     {
         mtx_unlock(&(q->q_lock));
         return false;
     }
+    fprintf(stderr, "%lu successfuly tryDequeued.\n", thrd_current());
     *return_pointer = dequeue();
-    // fprintf(stderr, "%lu successfuly terDequeued." ,thrd_current());
     mtx_unlock(&(q->q_lock));
     return true;
 }
 
-int func(void* a)
+int func1(void* a)
 {
     enqueue(a);
-    dequeue();
-    // else
-    //     printf("try dequeue result: %d:, tid: %lu \n", *((int*)p), thrd_current());
+    return 0;
+}
+
+int func2(void*)
+{
+    void* p;
+    if(!tryDequeue(&p))
+        dequeue();
     return 0;
 }
 
 int main(){
     for(int j = 0; j < 2; j++)
     {
-        int a[2];
-        thrd_t thrds[2];
+        int a[5];
+        thrd_t thrds[10];
         initQueue();
-        for(int i = 0; i < 2; i++)
+        for(int i = 0; i < 5; i++)
             a[i] = i;
-        for(int i = 0; i < 2; i++)
+        for(int i = 0; i < 10; i++)
         {
-            thrd_create(&thrds[i], func, &a[i]);
+            if(i % 2)
+                thrd_create(&thrds[i], func1, (&a[i/2]));
+            else
+                thrd_create(&thrds[i], func2, NULL);
         }
-        for(int i = 0; i < 2; i++)
+        for(int i = 0; i < 10; i++)
         {
             thrd_join(thrds[i], NULL);
         }
